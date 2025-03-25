@@ -23,7 +23,9 @@ def start_edge_and_playwright():
 
     try:
         # Start Edge with remote debugging enabled
-        subprocess.Popen([edge_path, "--remote-debugging-port=9222"])
+        subprocess.Popen([edge_path, "--remote-debugging-port=9222",
+                                     "--start-maximized"
+                        ])
     except Exception as e:
         messagebox.showerror("Error launching Edge", str(e))
         return
