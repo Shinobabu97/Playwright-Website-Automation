@@ -37,8 +37,20 @@ async def run_playwright():
             browser = await p.chromium.connect_over_cdp("http://localhost:9222")
             context = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = await context.new_page()
+            
+            # Export playwright code from egde browser Recorder(F12)
+            # Tip 1 Check if browser behaves differently when maximized and partly displayed
             await page.goto("https://www.kaggle.com")
-            await page.wait_for_timeout(5000)  # keep the tab open briefly
+      
+
+
+
+           
+            # playwright code end
+            
+            context.close()
+            browser.close()
+
     except Exception as e:
         messagebox.showerror("Playwright Error", str(e))
 
