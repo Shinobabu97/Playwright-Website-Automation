@@ -44,15 +44,18 @@ async def run_playwright():
             await page.goto("https://www.uni-due.de/studienangebote/studiengang.php?id=99")
 
             # Call the function to download file with your XPath and target folder
-            download_xpath = r'//*[@id="content__standard__main"]/div[1]/div/div/div/div/div/div[2]/div/p[5]/a'
+            r"""download_xpath = r'//*[@id="content__standard__main"]/div[1]/div/div/div/div/div/div[2]/div/p[5]/a'
             download_folder = r"C:\Users\shino\Desktop" 
             custom_filename = "my_custom_download"  # Optional
             await download_file(page, download_xpath, download_folder, custom_filename) #dont include the last paramter if you want to download it with default name
-            
+            """
        
-            
+            await page.close()
             await context.close()
-            await browser.close()
+            await browser.close()# this does not work as browser is externally via Chrome Dev Tools(CDT)
+            close_edge_instances()
+            
+
     except Exception as e:
         messagebox.showerror("Playwright Error", str(e))
 
