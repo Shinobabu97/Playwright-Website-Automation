@@ -1,0 +1,281 @@
+import subprocess
+import asyncio
+import tkinter as tk
+from tkinter import messagebox, filedialog
+from playwright.async_api import async_playwright
+import threading
+import os
+import psutil
+import signal
+import base64
+import time
+
+DEFAULT_EDGE_PATH = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+SAVE_PATH = r"C:\Users\wn00246424\OneDrive - WGS 365\SHINO\downloaded.pdf"
+
+def browse_edge():
+    path = filedialog.askopenfilename(title="Select msedge.exe", filetypes=[("Edge Executable", "msedge.exe")])
+    if path:
+        edge_path_entry.delete(0, tk.END)
+        edge_path_entry.insert(0, path)
+
+def open_edge_debug():
+    edge_path = edge_path_entry.get()
+    if not os.path.isfile(edge_path):
+        messagebox.showerror("Error", "Invalid Edge path!")
+        return
+
+    try:
+        close_edge_instances()
+        subprocess.Popen([edge_path, "--remote-debugging-port=9222", "--start-maximized", "https://billing.ups.com/ups/billing/invoice"])
+    except Exception as e:
+        messagebox.showerror("Error launching Edge", str(e))
+
+def start_playwright():
+    threading.Thread(target=lambda: asyncio.run(run_playwright()), daemon=True).start()
+
+async def run_playwright():
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.connect_over_cdp("http://localhost:9222")
+            context = browser.contexts[0] if browser.contexts else await browser.new_context()
+            page = None
+            for ptab in context.pages:
+                if "billing.ups.com/ups/billing/invoice" in ptab.url:
+                    page = ptab
+                    break
+
+            if not page:
+                messagebox.showerror("Playwright Error", "Couldn't find the invoice page in any open tab.")
+                return
+            start_invoice_time = time.time()
+
+            i = 1
+            while True:
+                filename_xpath = f'//*[@id="invoice-table_wrapper"]/div[2]/div/table/tbody/tr[{i}]/th/button'
+                filename_element = page.locator(f"xpath={filename_xpath}")
+
+                if not await filename_element.is_visible(timeout=1000):
+                    print(f"No more invoices at row {i}. Stopping.")
+                    break
+
+                invoice_number_long = await filename_element.inner_text()
+                invoice_number = "".join(c for c in invoice_number_long if c.isalnum()).lstrip("0")
+                print(f"\n--- Processing invoice: {invoice_number} (Row {i}) ---")
+
+                pdf_click_xpath = f'//*[@id="invoice-table_wrapper"]/div[2]/div/table/tbody/tr[{i}]/td[10]/div'
+
+                # Use a more reliable way to wait for the new tab
+                async with context.expect_page() as new_tab_info:
+                    await page.locator(f"xpath={pdf_click_xpath}").click()
+                    # Added timeout for the new tab to appear
+                    blob_tab = await new_tab_info.value
+                
+                # Ensure the new tab is fully loaded
+                await blob_tab.wait_for_load_state("networkidle")
+                # Increased wait time
+                await page.wait_for_timeout(1000)
+
+                try:
+                    blob_data = await blob_tab.evaluate("""
+                        () => {
+                            return new Promise((resolve, reject) => {
+                                try {
+                                    fetch(window.location.href)
+                                        .then(resp => {
+                                            if (!resp.ok) throw new Error('Network response was not ok');
+                                            return resp.blob();
+                                        })
+                                        .then(blob => {
+                                            const reader = new FileReader();
+                                            reader.onloadend = () => resolve(reader.result);
+                                            reader.onerror = () => reject(reader.error);
+                                            reader.readAsDataURL(blob);
+                                        })
+                                        .catch(err => reject(err));
+                                } catch (e) {
+                                    reject(e);
+                                }
+                            });
+                        }
+                    """)
+
+                    _, base64_data = blob_data.split(",", 1)
+                    save_path = os.path.join(os.path.dirname(SAVE_PATH), f"{invoice_number}.pdf")
+                    with open(save_path, "wb") as f:
+                        f.write(base64.b64decode(base64_data))
+                    print(f"Downloaded invoice PDF: {invoice_number}.pdf")
+                    print(f"Saving to: {save_path}")
+                except Exception as e:
+                    print(f"Error downloading invoice PDF: {str(e)}")
+
+                # Increased wait time before closing tab
+                await page.wait_for_timeout(1000)
+                await blob_tab.close()
+
+                # Increased wait time after closing tab
+                await page.wait_for_timeout(1000)
+                
+                # Open dropdown for StBs
+                await page.locator(f'//*[@id="dropdown-toggle-{invoice_number_long}"]/i').click()
+                await page.wait_for_load_state("networkidle")
+                await page.wait_for_timeout(500)
+
+                # Click on download documents
+                await page.locator(f'//*[@id="dropdown-download-doc-{invoice_number_long}"]').click()
+                await page.wait_for_load_state("networkidle")
+                await page.wait_for_timeout(1000)
+
+                index = 1
+                while True:
+                    stb_found = True
+                    shipment_input = page.locator('//*[@id="shipment-number-input"]')
+                    try:
+                        await shipment_input.wait_for(state="attached", timeout=1000)
+                        await shipment_input.click()
+                        await page.wait_for_timeout(1000)  # Increased wait time
+                    except Exception as e:
+                        print(f"Shipment input not available for invoice {invoice_number}: {str(e)}")
+                        try:
+                            await page.locator('//*[@id="invoice-documents-modal"]/div/div/div[1]/button').click()
+                            await page.wait_for_timeout(1000)
+                        except:
+                            pass
+                        break
+
+                    list_xpath = f'//*[@id="shipment-number"]/ul/li[{index + 1}]/span'
+                    locator = page.locator(f"xpath={list_xpath}")
+
+                    if not await locator.is_visible(timeout=3000):
+                        print(f"No more StBs found at index {index} for invoice {invoice_number}")
+                        break
+
+                    try:
+                        await locator.click()
+                        await page.wait_for_timeout(1000)  # Increased wait time
+
+                        download_button = page.locator('//*[@id="download-brokerage-doc"]')
+                        if not await download_button.is_visible(timeout=5000):
+                            print(f"Download button not found for StB{index}, skipping.")
+                            index += 1
+                            continue
+
+                        # Use expect_page with an explicit timeout
+                        async with context.expect_page(timeout=15000) as new_tab_info:
+                            await download_button.click()
+                            new_tab = await new_tab_info.value
+
+                        # Wait for the new tab to load completely
+                        await new_tab.wait_for_load_state("networkidle", timeout=15000)
+                        # Additional wait to ensure content is fully loaded
+                        await new_tab.wait_for_timeout(3000)
+
+                        # Check if URL is a blob
+                        if not new_tab.url.startswith("blob:"):
+                            print(f"StB{index} tab URL is not a blob. Got: {new_tab.url}")
+                            await new_tab.close()
+                            index += 1
+                            continue
+
+                        # More robust blob data retrieval
+                        try:
+                            blob_data = await new_tab.evaluate("""
+                                () => {
+                                    return new Promise((resolve, reject) => {
+                                        try {
+                                            fetch(window.location.href)
+                                                .then(resp => {
+                                                    if (!resp.ok) throw new Error('Network response was not ok');
+                                                    return resp.blob();
+                                                })
+                                                .then(blob => {
+                                                    const reader = new FileReader();
+                                                    reader.onloadend = () => resolve(reader.result);
+                                                    reader.onerror = () => reject(reader.error);
+                                                    reader.readAsDataURL(blob);
+                                                })
+                                                .catch(err => reject(err));
+                                        } catch (e) {
+                                            reject(e);
+                                        }
+                                    });
+                                }
+                            """)
+                            
+                            # Save the StB file
+                            _, base64_data = blob_data.split(",", 1)
+                            filename = f"{invoice_number}_StB{index}.pdf"
+                            save_path = os.path.join(os.path.dirname(SAVE_PATH), filename)
+                            with open(save_path, "wb") as f:
+                                f.write(base64.b64decode(base64_data))
+                            print(f"Downloaded StB: {filename}")
+                            
+                        except Exception as e:
+                            print(f"Failed to download StB{index} for invoice {invoice_number}: {str(e)}")
+                            
+                        finally:
+                            # Close the tab regardless of success or failure
+                            await page.wait_for_timeout(1000)  # Wait before closing
+                            await new_tab.close()
+                            await page.wait_for_timeout(1000)  # Wait after closing
+                            
+                    except Exception as e:
+                        print(f"Error processing StB{index} for invoice {invoice_number}: {str(e)}")
+                        
+                    # Move to next StB
+                    index += 1
+                    stb_found = False
+
+                # Close the modal when done with all StBs
+                
+                    try:
+                        if not stb_found:
+                            close_button = page.locator('//*[@id="invoice-documents-modal"]/div/div/div[1]/button')
+                            await close_button.click()
+                            await page.wait_for_timeout(300)
+                            print(f"✅ Closed modal after processing all StBs for invoice {invoice_number}")
+                            break
+                    except Exception as e:
+                        print(f"⚠️ Error closing modal for invoice {invoice_number}: {str(e)}")
+
+                # Move to next invoice
+                i += 1
+
+            await context.close()
+            print("Completed downloading all invoices and StBs")
+
+    except Exception as e:
+        messagebox.showerror("Playwright Error", str(e))
+
+
+def close_edge_instances():
+    for process in psutil.process_iter(attrs=["pid", "name", "cmdline"]):
+        try:
+            if process.info["name"] and "msedge" in process.info["name"].lower():
+                cmdline = " ".join(process.info["cmdline"]) if process.info["cmdline"] else ""
+                if "--remote-debugging-port=9222" in cmdline:
+                    print(f"Closing Edge instance (PID: {process.info['pid']})")
+                    os.kill(process.info["pid"], signal.SIGTERM)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+
+# GUI setup
+root = tk.Tk()
+root.title("Edge + Playwright Launcher")
+root.geometry("500x200")
+
+tk.Label(root, text="Path to Edge Executable:").pack(pady=5)
+edge_path_entry = tk.Entry(root, width=60)
+edge_path_entry.insert(0, DEFAULT_EDGE_PATH)
+edge_path_entry.pack(pady=5)
+
+browse_button = tk.Button(root, text="Browse", command=browse_edge)
+browse_button.pack(pady=5)
+
+debug_button = tk.Button(root, text="Open Edge for Login", command=open_edge_debug)
+debug_button.pack(pady=5)
+
+start_button = tk.Button(root, text="Run Playwright", command=start_playwright)
+start_button.pack(pady=10)
+
+root.mainloop()
