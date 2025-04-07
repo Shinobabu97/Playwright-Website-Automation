@@ -186,7 +186,8 @@ def send_email_with_attachment(file_path, subject):
         mail.Subject = subject
         mail.Body = "siehe Anhang."
         mail.Attachments.Add(file_path)
-        mail.Send()  # No GUI shown
+        #mail.Display() #draft 
+        #mail.Send()  # send with no GUI shown
         return True
     except Exception as e:
         log_message(f"Outlook Error: {str(e)}", error=True)
