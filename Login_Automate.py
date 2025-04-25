@@ -46,7 +46,7 @@ def open_edge_debug():
             "--remote-debugging-port=9222",
             "--user-data-dir=C:\\temp\\edge_debug_profile",  # Use a separate profile to avoid conflicts
             "--start-maximized",
-            "https://ssa.wuerth.de/gui/#/menu/home//overview"
+            "https://ssa.h.de/gui/#/menu/home//overview"
         ])
         
         # Give Edge time to start
