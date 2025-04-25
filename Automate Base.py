@@ -85,7 +85,7 @@ async def run_playwright():
             context = browser.contexts[0] if browser.contexts else await browser.new_context(accept_downloads=True)
             page = None
             for ptab in context.pages:
-                if "https://ssa.wuerth.de/gui/#/menu/home//overview" in ptab.url:
+                if "https://ssa.x.de/gui/#/menu/home//overview" in ptab.url:
                     page = ptab
                     break
 
@@ -94,7 +94,7 @@ async def run_playwright():
                 return
             # Email to DPD
             log_message("Automatisierungsprozess wird gestartet...")
-            await page.goto("https://ssa.wuerth.de/gui/#/menu/Dispatch/deliveriesCompleted/dlg/")
+            await page.goto("https://ssa.x.de/gui/#/menu/Dispatch/deliveriesCompleted/dlg/")
             await page.click('xpath=//*[@id="select-button"]')  # confirm date
             #log_message("Confirmed date selection...")
             await page.wait_for_timeout(1000)
@@ -127,7 +127,7 @@ async def run_playwright():
             # Email to GLS
             full_save_path = os.path.join(DEFAULT_DOWNLOAD_PATH, RENAMED_FILE_2)
             #log_message("Connected to page. Starting automation...")
-            await page.goto("https://ssa.wuerth.de/gui/#/menu/Dispatch/deliveriesCompleted/dlg/")
+            await page.goto("https://ssax.de/gui/#/menu/Dispatch/deliveriesCompleted/dlg/")
             await page.click('xpath=//*[@id="select-button"]')  # confirm date
             #log_message("Confirmed date selection...")
             await page.wait_for_timeout(1000)
